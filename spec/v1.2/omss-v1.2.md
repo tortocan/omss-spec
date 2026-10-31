@@ -23,7 +23,8 @@ License: MIT
 10. [Versioning and Compatibility](#10-versioning-and-compatibility)
 11. [Complete Examples](#11-complete-examples)
 12. [Scrobble Extension (Optional)](#12-scrobble-extension-optional)
-13. [License](#13-license)
+13. [Follow & Notifications Extension (Optional)](#13-follow--notifications-extension-optional)
+14. [License](#14-license)
 
 ---
 
@@ -1493,6 +1494,112 @@ The machine-readable schemas for every request and response in this section are 
 
 ---
 
-## 13. License
+## 13. Follow & Notifications Extension (Optional)
+
+The Follow extension lets an OMSS backend track titles a user **follows** and surface
+**notifications** when a followed title has a new release — all stored locally on the user's own
+environment, nothing sent to any third party. It pairs naturally with the Scrobble extension but is
+independent of it.
+
+This extension is **optional and additive**. A backend that implements it exposes the `/follow/*` and
+`/notifications/*` paths on the same origin as the core `/v1` surface, reuses the standard
+[error envelope](#71-error-response-format), and identifies titles by TMDB id as in core. Clients MUST
+degrade gracefully — treat a `404` on these paths as "this backend does not implement the extension".
+
+### 13.1 Media Key
+
+A followed title is addressed by a stable **media key** (title-level; episodes are not followed
+individually):
+
+- Movie: `m{tmdbId}` — e.g. `m603`.
+- Show: `s{tmdbId}` — e.g. `s1399` (the show's TMDB id).
+
+### 13.2 Endpoints
+
+| Method   | Path                          | Purpose                                                            |
+| -------- | ----------------------------- | ------------------------------------------------------------------ |
+| `POST`   | `/follow`                     | Follow a title (movie or show). Upsert; `text/plain` body allowed. |
+| `GET`    | `/follow`                     | Every followed title, newest-first.                                |
+| `GET`    | `/follow/{mediaKey}`          | One follow (`404` if not followed) — the is-followed check.        |
+| `DELETE` | `/follow/{mediaKey}`          | Unfollow one title (`204`/`404`).                                  |
+| `DELETE` | `/follow`                     | Unfollow everything (idempotent).                                  |
+| `GET`    | `/notifications`              | Release notifications, newest-first, paged.                        |
+| `GET`    | `/notifications/count`        | Unread count (for a badge).                                        |
+| `POST`   | `/notifications/read`         | Mark all unread notifications read.                                |
+| `POST`   | `/notifications/{id}/read`    | Mark one read (`204`/`404`).                                       |
+| `DELETE` | `/notifications/{id}`         | Remove one (`204`/`404`).                                          |
+| `DELETE` | `/notifications`              | Clear all (idempotent).                                            |
+
+### 13.3 Following a Title
+
+`POST /follow` upserts one title's follow.
+
+- `mediaType` is `movie`, `tv`, or `show` (`tv` is an alias for `show`).
+- The backend stamps the follow's **available watermark** at follow time, so the existing
+  back-catalog is not announced — only releases newer than the follow produce notifications.
+- The body MAY be `application/json` or `text/plain` (as in Scrobble, to allow preflight-free POSTs).
+
+```json
+// POST /follow
+{ "mediaType": "movie", "tmdbId": 603, "title": "The Matrix" }
+```
+
+```json
+// 200 OK
+{ "mediaKey": "m603", "mediaType": "movie", "tmdbId": 603, "title": "The Matrix", "following": true, "created": true }
+```
+
+`created` is `false` when the title was already followed.
+
+### 13.4 Notifications
+
+A backend detects new releases however it can (e.g. comparing its catalog's newly-available files, or
+an upstream release calendar) and writes notification rows. Each has a `kind`:
+
+- `available` — a followed movie, or a new episode of a followed show, now has a playable file.
+- `upcoming` — a followed title is airing/releasing soon.
+
+`GET /notifications/count` returns `{ "unread": N }` for a badge; `GET /notifications` returns a paged,
+newest-first list with DataTables-style counters. `readAt` is `null` while unread.
+
+```json
+// GET /notifications → 200 OK
+{
+    "recordsTotal": 1,
+    "recordsFiltered": 1,
+    "data": [
+        {
+            "id": 7, "kind": "available", "mediaKey": "s1399", "tmdbId": 1399, "mediaType": "show",
+            "title": "Game of Thrones", "message": "Game of Thrones S01E02 is now available",
+            "season": 1, "episode": 2, "createdAt": 1793476297, "readAt": null
+        }
+    ]
+}
+```
+
+### 13.5 Schemas
+
+**FollowState**
+
+- `mediaKey` (string): `m{tmdb}` | `s{tmdb}`.
+- `mediaType` (string): `movie` | `show`.
+- `tmdbId` (integer); `title` (string | null).
+- `createdAt` (integer): unix seconds.
+- `availableWatermark` (integer): unix seconds; only newer releases notify.
+
+**NotificationItem**
+
+- `id` (integer): stable id.
+- `kind` (string): `available` | `upcoming`.
+- `mediaKey` (string); `tmdbId` (integer); `mediaType` (string): `movie` | `show`.
+- `title`, `message` (string); `season`, `episode` (integer, 0 for a movie).
+- `createdAt` (integer, unix seconds); `readAt` (integer | null): null = unread.
+
+The machine-readable schemas are defined in [`omss-v1.2.yml`](./omss-v1.2.yml) (`Follow` and
+`Notifications` tags).
+
+---
+
+## 14. License
 
 This specification is licensed under the MIT License.

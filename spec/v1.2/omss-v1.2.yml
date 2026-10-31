@@ -60,6 +60,10 @@ tags:
         points / watched history (local, no third party).
     - name: Resume
       description: Optional backend extension. The backend's continue-watching decision for a title.
+    - name: Follow
+      description: Optional backend extension. Follow titles (movie/show) for new-release notifications.
+    - name: Notifications
+      description: Optional backend extension. The release-notification feed for followed titles.
 
 paths:
   /:
@@ -354,6 +358,174 @@ paths:
           description: Removed.
         '404':
           description: No such row.
+
+  # ---- Follow extension (optional) ----------------------------------------------------------
+  /follow:
+    post:
+      summary: Follow a title
+      description: "Follow a movie or show (TMDB-keyed) for new-release notifications. Upsert; body may be application/json or text/plain."
+      operationId: follow
+      tags: [Follow]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FollowRequest'
+          text/plain:
+            schema:
+              $ref: '#/components/schemas/FollowRequest'
+      responses:
+        '200':
+          description: The upserted follow.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FollowAck'
+        '400':
+          description: Bad media type or missing tmdbId.
+    get:
+      summary: List follows
+      description: Every followed title, newest-first.
+      operationId: getFollows
+      tags: [Follow]
+      responses:
+        '200':
+          description: The follows.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FollowListResponse'
+    delete:
+      summary: Unfollow everything
+      description: "Remove every follow. Idempotent - clearing an empty store returns `deleted: 0`."
+      operationId: clearFollows
+      tags: [Follow]
+      responses:
+        '200':
+          description: The number removed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClearResult'
+
+  /follow/{mediaKey}:
+    get:
+      summary: Is this title followed?
+      description: "The follow row for a media key (`m{tmdb}` | `s{tmdb}`), or 404 if not followed."
+      operationId: getFollow
+      tags: [Follow]
+      parameters:
+        - $ref: '#/components/parameters/MediaKey'
+      responses:
+        '200':
+          description: The follow.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FollowState'
+        '404':
+          description: Not followed.
+    delete:
+      summary: Unfollow one title
+      description: Remove one follow.
+      operationId: unfollow
+      tags: [Follow]
+      parameters:
+        - $ref: '#/components/parameters/MediaKey'
+      responses:
+        '204':
+          description: Removed.
+        '404':
+          description: Not followed.
+
+  # ---- Notifications extension (optional) ---------------------------------------------------
+  /notifications:
+    get:
+      summary: List notifications
+      description: Release notifications, newest-first, with DataTables-style paging counters.
+      operationId: getNotifications
+      tags: [Notifications]
+      parameters:
+        - { name: unreadOnly, in: query, required: false, schema: { type: boolean }, description: Only unread. }
+        - { name: start, in: query, required: false, schema: { type: integer }, description: Page offset. }
+        - { name: length, in: query, required: false, schema: { type: integer }, description: Page size (default 50). }
+      responses:
+        '200':
+          description: The notifications.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationListResponse'
+    delete:
+      summary: Clear all notifications
+      description: "Remove every notification. Idempotent - clearing an empty store returns `deleted: 0`."
+      operationId: clearNotifications
+      tags: [Notifications]
+      responses:
+        '200':
+          description: The number removed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClearResult'
+
+  /notifications/count:
+    get:
+      summary: Unread count
+      description: The unread notification count, for a badge.
+      operationId: getNotificationCount
+      tags: [Notifications]
+      responses:
+        '200':
+          description: The unread count.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationCount'
+
+  /notifications/read:
+    post:
+      summary: Mark all read
+      description: Mark every unread notification read; returns the count updated.
+      operationId: markNotificationsRead
+      tags: [Notifications]
+      responses:
+        '200':
+          description: The number updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [updated]
+                properties:
+                  updated: { type: integer }
+
+  /notifications/{id}/read:
+    post:
+      summary: Mark one read
+      operationId: markNotificationRead
+      tags: [Notifications]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        '204':
+          description: Marked read.
+        '404':
+          description: No such notification.
+
+  /notifications/{id}:
+    delete:
+      summary: Remove one notification
+      operationId: deleteNotification
+      tags: [Notifications]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        '204':
+          description: Removed.
+        '404':
+          description: No such notification.
 
 components:
   parameters:
@@ -1051,3 +1223,90 @@ components:
       required: [deleted]
       properties:
         deleted: { type: integer, description: Number of rows removed. }
+
+    # ---- Follow + notifications extension schemas ---------------------------------------------
+    FollowMediaType:
+      type: string
+      description: Media kind a follow represents.
+      enum: [movie, show]
+
+    FollowRequest:
+      type: object
+      description: Body of POST /follow. `mediaType` accepts `tv` as an alias for `show`.
+      required: [mediaType, tmdbId]
+      properties:
+        mediaType: { type: string, enum: [movie, tv, show] }
+        tmdbId: { type: integer }
+        title: { type: string, description: Optional display title, stored denormalized. }
+
+    FollowState:
+      type: object
+      description: One followed title.
+      required: [mediaKey, mediaType, tmdbId, createdAt, availableWatermark]
+      properties:
+        mediaKey: { type: string, description: "`m{tmdb}` | `s{tmdb}`." }
+        mediaType: { $ref: '#/components/schemas/FollowMediaType' }
+        tmdbId: { type: integer }
+        title: { type: [string, 'null'] }
+        createdAt: { type: integer, description: Unix seconds. }
+        availableWatermark: { type: integer, description: Unix seconds; only newer releases notify. }
+
+    FollowAck:
+      type: object
+      description: Acknowledgement returned by POST /follow.
+      required: [mediaKey, mediaType, tmdbId, following, created]
+      properties:
+        mediaKey: { type: string }
+        mediaType: { $ref: '#/components/schemas/FollowMediaType' }
+        tmdbId: { type: integer }
+        title: { type: [string, 'null'] }
+        following: { type: boolean }
+        created: { type: boolean, description: False when the title was already followed. }
+
+    FollowListResponse:
+      type: object
+      required: [count, data]
+      properties:
+        count: { type: integer }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/FollowState' }
+
+    NotificationKind:
+      type: string
+      description: Why the notification was raised.
+      enum: [available, upcoming]
+
+    NotificationItem:
+      type: object
+      description: One release notification for a followed title.
+      required: [id, mediaKey, tmdbId, mediaType, kind, title, message, season, episode, createdAt]
+      properties:
+        id: { type: integer, format: int64 }
+        dedupeKey: { type: string, description: Stable idempotency key. }
+        mediaKey: { type: string }
+        tmdbId: { type: integer }
+        mediaType: { $ref: '#/components/schemas/FollowMediaType' }
+        kind: { $ref: '#/components/schemas/NotificationKind' }
+        title: { type: string }
+        message: { type: string }
+        season: { type: integer, description: 0 for a movie. }
+        episode: { type: integer, description: 0 for a movie. }
+        createdAt: { type: integer, description: Unix seconds. }
+        readAt: { type: [integer, 'null'], description: Unix seconds; null = unread. }
+
+    NotificationListResponse:
+      type: object
+      required: [recordsTotal, recordsFiltered, data]
+      properties:
+        recordsTotal: { type: integer }
+        recordsFiltered: { type: integer }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/NotificationItem' }
+
+    NotificationCount:
+      type: object
+      required: [unread]
+      properties:
+        unread: { type: integer }
