@@ -248,7 +248,7 @@ GET /v1
 - `providers` (array of objects): List of providers this backend provides. Each object contains:
     - `id` (string): Unique provider identifier (MUST BE URL SAFE).
     - `name` (string): Human-readable provider name.
-    - `capabilities` (array of strings): List of media types the provider supports any of `movies`, `tv` and/or `subtitles`.
+    - `capabilities` (array of strings): The capabilities the provider advertises — the media types it supplies (any of `movies`, `tv`, `subtitles`) and/or the generic action `transcode` (the provider can transcode media; how it does so is backend-specific and out of scope for this spec).
 
 **Optional Fields:**
 

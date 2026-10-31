@@ -824,14 +824,17 @@ components:
         capabilities:
           type: array
           description: >
-            List of media types the provider supports. Any combination of
-            "movies", "tv", and/or "subtitles".
+            The capabilities a provider advertises. These are the media types it supplies — any
+            combination of "movies", "tv", and/or "subtitles" — and/or the generic action "transcode"
+            (the provider can transcode media). How transcoding is performed is backend-specific and
+            out of scope for this spec.
           items:
             type: string
             enum:
               - movies
               - tv
               - subtitles
+              - transcode
 
     ProviderRef:
       type: object
